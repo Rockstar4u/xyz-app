@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-web
+  labels:
+    app: python-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: python-web
+  template:
+    metadata:
+      labels:
+        app: python-web
+    spec:
+      containers:
+      - name: python-web
+        image: 472396694676.dkr.ecr.eu-west-1.amazonaws.com/xyz-repo:RELEASE_VERSION
+        ports:
+          - containerPort: 8080
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: python-web
+spec:
+  selector:
+    app: python-web
+  type: NodePort
+  ports:
+  - protocol: TCP
+    port: 8083
+    targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: python-web
+              port:
+                number: 8083
+---

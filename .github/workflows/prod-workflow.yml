@@ -1,0 +1,134 @@
+name: Production Build
+on:
+  push:
+    branches:
+      - 'feature/test-branch'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  AWS_ECR_REGION: eu-west-1
+  RELEASE_VERSION: 1.0.1
+  ECR_XYZ_REPOSITORY: xyz-repo
+
+jobs:
+  pre-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Check if terraform dir changed
+        uses: tj-actions/changed-files@v35
+        id: changed-files-specific-terraform
+        with:
+          since_last_remote_commit: true
+          files: |
+            terraform/**
+      - name: file change output
+        run: |
+          echo "Terraform change- ${{steps.changed-files-specific-terraform.outputs.any_modified}}"
+      - name: Terraform output
+        id: run_terraform
+        run: |
+          if [[ ("${{ steps.changed-files-specific-terraform.outputs.any_modified }}" == "true") ]]; then
+            echo "Terraform dir changed"
+            echo "run_terraform=Yes" >> $GITHUB_OUTPUT
+          else
+            echo "Terraform dir not changed"
+            echo "run_terraform=No" >> $GITHUB_OUTPUT
+          fi
+    outputs:
+      RUN_TERRAFORM: ${{ steps.run_terraform.outputs.run_terraform }}
+
+  run-terraform:
+    name: Run Terraform
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: [pre-ci]
+    if: |
+      (needs.pre-ci.outputs.RUN_TERRAFORM == 'Yes')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1-node16
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+          aws-region: ${{ env.AWS_ECR_REGION }}
+      - name: apply terraform
+        run: |
+          cd terraform
+          make CLIENT=app apply
+
+  xyz-app:
+    name: build-app
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [pre-ci]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1-node16
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+          aws-region: ${{ env.AWS_ECR_REGION }}
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+        with:
+          mask-password: true
+      - name: Build and push xyz Image
+        uses: docker/build-push-action@v3.2.0
+        with:
+          context: src/microservices/app
+          builder: ${{ steps.buildx.outputs.name }}
+          file: ./src/microservices/app/Dockerfile
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_XYZ_REPOSITORY }}:${{ env.RELEASE_VERSION }}
+
+  xyz-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [run-terraform, xyz-app]
+    if: |
+      always() && !contains(needs.*.result, 'failure') && !cancelled() &&
+      !(needs.run-terraform.result == 'skipped' && needs.pre-ci.outputs.RUN_TERRAFORM == 'Yes')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 60
+      - uses: azure/setup-kubectl@v3.1
+        with:
+          version: v1.23.6
+        id: install
+      - name: Assume Role
+        uses: youyo/awscredswrap@v1.0.4
+        with:
+          role_arn: ${{ secrets.AWS_TERRAFORM_ROLE }}
+          duration_seconds: 3600
+          role_session_name: EKS
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID_DEV }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+          AWS_DEFAULT_REGION: ${{ env.AWS_ECR_REGION }}
+      - name: Setup EKS Kubectl
+        uses: vrathore18/setup-eks-kubectl@v1.0.0
+        with:
+          cluster: app
+          region: eu-west-1
+      - name: Deployment
+        env:
+          RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+        run: |
+            sed -i "s/RELEASE_VERSION/$RELEASE_VERSION/g" "./deployment/xyz-deployment.yaml"
+            kubectl apply -f ./deployment/xyz-deployment.yaml
+      - name: Remove AWS Credential
+        run: |
+          rm -rf ~/.aws
+          rm -rf ~/.kube/config
