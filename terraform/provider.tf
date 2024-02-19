@@ -24,7 +24,6 @@ provider "helm" {
   }
 }
 
-
 terraform {
    backend "s3" {}
 }

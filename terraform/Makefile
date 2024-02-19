@@ -2,9 +2,9 @@ SHELL=bash
 current_dir = $(shell pwd)
 
 BACKEND_CONFIG_BUCKET_REGION=${aws_default_region}
-BACKEND_CONFIG_BUCKET=xyz-terraform-tfstatefile
+BACKEND_CONFIG_BUCKET=xyz-project-terraform-tfstatefile
 BACKEND_CONFIG_TFSTATE_FILE_KEY=client-infrastructure.tfstate
-BACKEND_CONFIG_ROLE_ARN=arn:aws:iam::472396694676:role/terraform
+BACKEND_CONFIG_ROLE_ARN=arn:aws:iam::857783516949:role/terraform
 
 help:
 	@echo "Usage: make CLIENT=%CLIENT_NAME% %action%"
@@ -66,7 +66,7 @@ endif
 
 AWS_SESSION_TOKEN=
 ifeq (${CLIENT},app)
-	AWS_ACCOUNT_ID=472396694676
+	AWS_ACCOUNT_ID=857783516949
 endif
 
 build_docker_container:
