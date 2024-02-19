@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: python-web
-        image: 472396694676.dkr.ecr.eu-west-1.amazonaws.com/xyz-repo:RELEASE_VERSION
+        image: 857783516949.dkr.ecr.eu-west-1.amazonaws.com/xyz-repo:RELEASE_VERSION
         ports:
           - containerPort: 8080
 ---
